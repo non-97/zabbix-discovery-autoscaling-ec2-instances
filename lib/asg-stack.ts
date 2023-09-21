@@ -1,16 +1,18 @@
-import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as cdk from "aws-cdk-lib";
+import { Construct } from "constructs";
+import { Vpc } from "./constructs/vpc";
+import { AutoScalingGroup } from "./constructs/autoscaling-group";
 
 export class AsgStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
+    // VPC
+    const vpc = new Vpc(this, "Vpc");
 
-    // example resource
-    // const queue = new sqs.Queue(this, 'AsgQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
+    // EC2 Instance
+    new AutoScalingGroup(this, "Asg", {
+      vpc: vpc.vpc,
+    });
   }
 }
