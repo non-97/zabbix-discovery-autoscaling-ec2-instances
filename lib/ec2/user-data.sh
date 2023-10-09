@@ -7,14 +7,30 @@ exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&
 
 declare -r max_retry_interval=8
 declare -r max_retries=16
-declare -r hostname_prefix=web-
-declare -r hostname_domain=corp.non-97.net
-declare -r filter_tag_key=aws:autoscaling:groupName
-declare -r filter_tag_value=asg
+declare -r hostname_prefix=__hostname_prefix__
+declare -r hostname_domain=__hostname_domain__
+declare -r filter_tag_key=__filter_tag_key__
+declare -r filter_tag_value=__filter_tag_value__
+declare -r hosted_zone_id=__hosted_zone_id__
 
 # Get my instance ID
-token=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
-instance_id=$(curl -s -H "X-aws-ec2-metadata-token: $token" "http://169.254.169.254/latest/meta-data/instance-id")
+token=$(curl \
+  -s \
+  -X PUT \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+  "http://169.254.169.254/latest/api/token"
+)
+instance_id=$(curl \
+  -s \
+  -H "X-aws-ec2-metadata-token: $token" \
+  "http://169.254.169.254/latest/meta-data/instance-id"
+)
+
+ip_address=$(curl \
+  -s \
+  -H "X-aws-ec2-metadata-token: $token" \
+  "http://169.254.169.254/latest/meta-data/local-ipv4"
+)
 
 for i in $(seq 1 $max_retries); do
   echo "======================================================="
@@ -68,11 +84,47 @@ for i in $(seq 1 $max_retries); do
   # Check if the instance itself is the only one holding the hostname
   if [[ "${instance_ids[0]}" == "$instance_id" && "${#instance_ids[@]}" == 1 ]]; then
     # Set OS hostname and break the loop
-    echo "Set HostName ${candidate_hostname}.${hostname_domain}"
-    hostnamectl set-hostname "${candidate_hostname}.${hostname_domain}"
+    hostname="${candidate_hostname}.${hostname_domain}"
+    echo "Set HostName ${hostname}"
+    hostnamectl set-hostname ${hostname}
     
     echo "hostnamectl :
       $(hostnamectl)"
+
+    rrset_exists=$(dig $hostname +short)
+
+    # Route 53 RRset
+    rrset_action=""
+    if [[ -z $rrset_exists ]]; then
+      rrset_action=CREATE
+    else
+      rrset_action=UPSERT
+    fi
+
+    change_resource_record_sets_input=$(cat <<EOF
+    {
+      "Changes": [
+        {
+          "Action": "$rrset_action",
+          "ResourceRecordSet": {
+            "Name": "${hostname}",
+            "Type": "A",
+            "TTL": 300,
+            "ResourceRecords": [
+              {
+                "Value": "$ip_address"
+              }
+            ]
+          }
+        }
+      ]
+    }
+EOF
+)
+
+    aws route53 change-resource-record-sets \
+      --hosted-zone-id "$hosted_zone_id" \
+      --change-batch "$change_resource_record_sets_input"
     break
   else
     # Remove the HostName tag and retry
