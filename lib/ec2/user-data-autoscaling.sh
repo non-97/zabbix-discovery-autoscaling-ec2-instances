@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ue
+set -u
 
 # Redirect /var/log/user-data.log and /dev/console
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
@@ -12,6 +12,7 @@ declare -r hostname_domain=__hostname_domain__
 declare -r filter_tag_key=__filter_tag_key__
 declare -r filter_tag_value=__filter_tag_value__
 declare -r hosted_zone_id=__hosted_zone_id__
+declare -r zabbix_server_ip=__zabbix_server_ip__
 
 # Get my instance ID
 token=$(curl \
@@ -143,3 +144,27 @@ done
 if [[ $i == $max_retries ]]; then
   echo "Failed to allocate a unique hostname after $max_retries retries. Please manually assign a hostname."
 fi
+
+# Install Zabbix Agent
+for i in $(seq 1 $max_retries); do
+  rpm -Uvh https://repo.zabbix.com/zabbix/6.4/rhel/9/x86_64/zabbix-release-6.4-1.el9.noarch.rpm
+  dnf clean all
+  dnf install -y zabbix-agent2
+
+  if [[ $? == 0 ]]; then
+    sed -i "s/Server=127.0.0.1/Server=$zabbix_server_ip/g" /etc/zabbix/zabbix_agent2.conf
+    systemctl enable --now zabbix-agent2
+
+    break
+  else
+    retry_interval=$(($RANDOM % $max_retry_interval))
+
+    echo "Failed to install Zabbix Agent, retrying in $retry_interval seconds..."
+    sleep $retry_interval
+  fi
+done
+
+if [[ $i == $max_retries ]]; then
+  echo "Failed to install Zabbix Agent after $max_retries retries. Please manually install Zabbix Agent."
+fi
+

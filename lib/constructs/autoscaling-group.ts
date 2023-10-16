@@ -6,6 +6,7 @@ import * as path from "path";
 export interface AutoScalingGroupProps {
   vpc: cdk.aws_ec2.IVpc;
   hostedZone: cdk.aws_route53.HostedZone;
+  zabbixServerIpAddress: string;
 }
 
 export class AutoScalingGroup extends Construct {
@@ -15,7 +16,7 @@ export class AutoScalingGroup extends Construct {
     super(scope, id);
 
     const autoScalingGroupName = "asg";
-    const hostname_prefix = "web-";
+    const hostname_prefix = "host-";
     const hostname_domain = `asg.${props.hostedZone.zoneName}`;
     const filter_tag_key = "aws:autoscaling:groupName";
 
@@ -60,7 +61,7 @@ export class AutoScalingGroup extends Construct {
 
     // User data
     const userDataScript = fs.readFileSync(
-      path.join(__dirname, "../ec2/user-data.sh"),
+      path.join(__dirname, "../ec2/user-data-autoscaling.sh"),
       "utf8"
     );
 
@@ -72,6 +73,7 @@ export class AutoScalingGroup extends Construct {
         .replace(/__filter_tag_key__/g, filter_tag_key)
         .replace(/__filter_tag_value__/g, autoScalingGroupName)
         .replace(/__hosted_zone_id__/g, props.hostedZone.hostedZoneId)
+        .replace(/__zabbix_server_ip__/g, props.zabbixServerIpAddress)
     );
 
     this.asg = new cdk.aws_autoscaling.AutoScalingGroup(this, "Default", {
@@ -79,7 +81,7 @@ export class AutoScalingGroup extends Construct {
       machineImage: cdk.aws_ec2.MachineImage.latestAmazonLinux2023({
         cachedInContext: true,
       }),
-      instanceType: new cdk.aws_ec2.InstanceType("t3.nano"),
+      instanceType: new cdk.aws_ec2.InstanceType("t3.micro"),
       vpc: props.vpc,
       vpcSubnets: props.vpc.selectSubnets({
         subnetGroupName: "Public",
@@ -90,7 +92,7 @@ export class AutoScalingGroup extends Construct {
       ssmSessionPermissions: true,
       userData,
       healthCheck: cdk.aws_autoscaling.HealthCheck.elb({
-        grace: cdk.Duration.minutes(3),
+        grace: cdk.Duration.minutes(1),
       }),
     });
     this.asg.scaleOnCpuUtilization("CpuScaling", {
